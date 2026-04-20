@@ -31,19 +31,26 @@
         <main class="p-4 max-w-md mx-auto">
             <section v-if="activeTab === 'pos'">
                 <div class="mb-4">
-                    <button @click="startScanner" class="w-full bg-indigo-600 text-white p-4 rounded-xl flex items-center justify-center gap-2 shadow-lg">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v1m-3.3 3.6l-.7-.7m12.1 2.1h-1m-4.7 6.3l.7.7M6.4 19.4l.7-.7M4 12h1m3.1-7.8l-.7.7"></path></svg>
+                    <button v-if="!isScanning" 
+                            @click="startScanner" 
+                            class="w-full bg-indigo-600 text-white p-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 4v1m-3.3 3.6l-.7-.7m12.1 2.1h-1m-4.7 6.3l.7.7M6.4 19.4l.7-.7M4 12h1m3.1-7.8l-.7.7"></path>
+                        </svg>
                         Scan Barcode
                     </button>
-                    <div id="scanner-container" v-show="isScanning" class="mt-2 bg-black rounded-lg overflow-hidden relative">
+                    
+                    <div id="scanner-container" v-show="isScanning" class="mt-2 bg-black rounded-lg overflow-hidden relative shadow-2xl border-2 border-indigo-500">
                         <video id="video" class="w-full h-64 object-cover" autoplay muted playsinline></video>
                         
-                        <div class="absolute bottom-2 left-2 right-2 flex justify-between items-center bg-black/50 p-2 rounded-lg">
-                            <label class="flex items-center gap-2 text-white text-xs cursor-pointer">
-                                <input type="checkbox" v-model="isContinuous" class="w-4 h-4 text-indigo-600">
-                                Scan Terus-menerus
+                        <div class="absolute bottom-2 left-2 right-2 flex justify-between items-center bg-black/60 backdrop-blur-md p-3 rounded-xl border border-white/20">
+                            <label class="flex items-center gap-2 text-white text-xs cursor-pointer select-none">
+                                <input type="checkbox" v-model="isContinuous" class="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                <span>Scan Terus-menerus</span>
                             </label>
-                            <button @click="stopScanner" class="bg-red-500 text-white px-3 py-1 rounded-md text-xs font-bold">Tutup</button>
+                            <button @click="stopScanner" class="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition-colors">
+                                Tutup
+                            </button>
                         </div>
                     </div>
                 </div>
