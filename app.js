@@ -71,50 +71,81 @@ const app = createApp({
         // --- SCANNER LOGIC ---
         let codeReader = null;
         
-        const startScanner = async () => {
-            isScanning.value = true;
-            codeReader = new ZXing.BrowserMultiFormatReader();
-            
-            // Konfigurasi untuk memaksa kamera belakang (environment)
-            const constraints = {
-                video: { 
-                    facingMode: { exact: "environment" } 
-                }
-            };
+const startScanner = async () => {
+    isScanning.value = true;
+    
+    // Pastikan reader bersih sebelum mulai
+    if (codeReader) {
+        codeReader.reset();
+    }
+    
+    codeReader = new ZXing.BrowserMultiFormatReader();
+    
+    try {
+        // 1. Ambil daftar semua kamera yang ada
+        const videoDevices = await codeReader.listVideoInputDevices();
         
-            try {
-                // Menggunakan decodeFromConstraints untuk menangani 'facingMode'
-                await codeReader.decodeFromConstraints(constraints, 'video', (result, err) => {
-                    if (result) {
-                        const found = products.value.find(p => p.barcode === result.text);
-                        if (found) {
-                            addToCart(found);
-                            stopScanner();
-                        }
-                    }
-                    if (err && !(err instanceof ZXing.NotFoundException)) {
-                        console.error(err);
-                    }
-                });
-            } catch (err) {
-                console.warn("Kamera belakang tidak ditemukan, mencoba kamera default...");
-                // Fallback: Jika gagal (misal di laptop), coba buka kamera default
-                try {
-                    await codeReader.decodeFromVideoDevice(undefined, 'video', (result, err) => {
-                        if (result) {
-                            const found = products.value.find(p => p.barcode === result.text);
-                            if (found) {
-                                addToCart(found);
-                                stopScanner();
-                            }
-                        }
-                    });
-                } catch (retryErr) {
-                    alert("Tidak dapat mengakses kamera. Pastikan izin telah diberikan.");
-                    isScanning.value = false;
-                }
+        // 2. Filter kamera yang labelnya mengandung kata 'back', 'rear', atau 'belakang'
+        // Jika tidak ketemu, kita ambil kamera terakhir (biasanya kamera belakang di Android)
+        let selectedDeviceId = null;
+        
+        const backCamera = videoDevices.find(device => 
+            device.label.toLowerCase().includes('back') || 
+            device.label.toLowerCase().includes('rear') ||
+            device.label.toLowerCase().includes('belakang')
+        );
+
+        if (backCamera) {
+            selectedDeviceId = backCamera.deviceId;
+        } else {
+            // Fallback: Gunakan kamera terakhir di daftar
+            selectedDeviceId = videoDevices[videoDevices.length - 1].deviceId;
+        }
+
+        console.log("Memulai kamera ID:", selectedDeviceId);
+
+        // 3. Gunakan decodeFromVideoDevice dengan ID spesifik
+        // Kita juga tambahkan constraints untuk memperkuat instruksi ke browser
+        const constraints = {
+            video: { 
+                deviceId: { exact: selectedDeviceId },
+                facingMode: "environment" 
             }
         };
+
+        await codeReader.decodeFromConstraints(constraints, 'video', (result, err) => {
+            if (result) {
+                const found = products.value.find(p => p.barcode === result.text);
+                if (found) {
+                    addToCart(found);
+                    navigator.vibrate?.(100);
+                    stopScanner();
+                }
+            }
+            if (err && !(err instanceof ZXing.NotFoundException)) {
+                // Abaikan error "not found" karena itu wajar saat proses scanning
+            }
+        });
+
+    } catch (err) {
+        console.error("Gagal inisialisasi kamera:", err);
+        // Jika gagal total, gunakan cara paling simpel
+        codeReader.decodeFromVideoDevice(undefined, 'video', (result) => {
+            if (result) {
+                const found = products.value.find(p => p.barcode === result.text);
+                if (found) { addToCart(found); stopScanner(); }
+            }
+        });
+    }
+};
+
+const stopScanner = () => {
+    if (codeReader) {
+        codeReader.reset(); // Ini penting untuk mematikan lampu kamera dan stream
+        codeReader = null;
+    }
+    isScanning.value = false;
+};
 
         const addToCart = (product) => {
             const existing = cart.value.find(i => i.id === product.id);
