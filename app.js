@@ -70,21 +70,50 @@ const app = createApp({
 
         // --- SCANNER LOGIC ---
         let codeReader = null;
+        
         const startScanner = async () => {
             isScanning.value = true;
             codeReader = new ZXing.BrowserMultiFormatReader();
-            const videoInputDevices = await codeReader.listVideoInputDevices();
-            const selectedDeviceId = videoInputDevices[0].deviceId;
-
-            codeReader.decodeFromVideoDevice(selectedDeviceId, 'video', (result, err) => {
-                if (result) {
-                    const found = products.value.find(p => p.barcode === result.text);
-                    if (found) {
-                        addToCart(found);
-                        stopScanner();
-                    }
+            
+            // Konfigurasi untuk memaksa kamera belakang (environment)
+            const constraints = {
+                video: { 
+                    facingMode: { exact: "environment" } 
                 }
-            });
+            };
+        
+            try {
+                // Menggunakan decodeFromConstraints untuk menangani 'facingMode'
+                await codeReader.decodeFromConstraints(constraints, 'video', (result, err) => {
+                    if (result) {
+                        const found = products.value.find(p => p.barcode === result.text);
+                        if (found) {
+                            addToCart(found);
+                            stopScanner();
+                        }
+                    }
+                    if (err && !(err instanceof ZXing.NotFoundException)) {
+                        console.error(err);
+                    }
+                });
+            } catch (err) {
+                console.warn("Kamera belakang tidak ditemukan, mencoba kamera default...");
+                // Fallback: Jika gagal (misal di laptop), coba buka kamera default
+                try {
+                    await codeReader.decodeFromVideoDevice(undefined, 'video', (result, err) => {
+                        if (result) {
+                            const found = products.value.find(p => p.barcode === result.text);
+                            if (found) {
+                                addToCart(found);
+                                stopScanner();
+                            }
+                        }
+                    });
+                } catch (retryErr) {
+                    alert("Tidak dapat mengakses kamera. Pastikan izin telah diberikan.");
+                    isScanning.value = false;
+                }
+            }
         };
 
         const addToCart = (product) => {
