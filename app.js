@@ -74,46 +74,46 @@ const app = createApp({
 const startScanner = async () => {
     isScanning.value = true;
     
-    // Pastikan reader bersih sebelum mulai
+    // 1. Reset reader lama jika ada
     if (codeReader) {
-        codeReader.reset();
+        await codeReader.reset();
     }
     
     codeReader = new ZXing.BrowserMultiFormatReader();
     
     try {
-        // 1. Ambil daftar semua kamera yang ada
+        // 2. Minta izin dulu agar label kamera muncul
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach(track => track.stop()); // Matikan sementara setelah dapat izin
+
+        // 3. Ambil daftar semua kamera
         const videoDevices = await codeReader.listVideoInputDevices();
         
-        // 2. Filter kamera yang labelnya mengandung kata 'back', 'rear', atau 'belakang'
-        // Jika tidak ketemu, kita ambil kamera terakhir (biasanya kamera belakang di Android)
+        if (videoDevices.length === 0) {
+            alert("Kamera tidak ditemukan");
+            return;
+        }
+
+        // 4. Cari Kamera Belakang secara eksplisit
         let selectedDeviceId = null;
         
+        // Cari berdasarkan label (Cara paling akurat jika label tersedia)
         const backCamera = videoDevices.find(device => 
-            device.label.toLowerCase().includes('back') || 
-            device.label.toLowerCase().includes('rear') ||
-            device.label.toLowerCase().includes('belakang')
+            /back|rear|environment|belakang|belakang/i.test(device.label)
         );
 
         if (backCamera) {
             selectedDeviceId = backCamera.deviceId;
         } else {
-            // Fallback: Gunakan kamera terakhir di daftar
+            // Jika label tidak jelas (misal cuma "Camera 0"), 
+            // pilih kamera terakhir di list (biasanya kamera belakang utama)
             selectedDeviceId = videoDevices[videoDevices.length - 1].deviceId;
         }
 
-        console.log("Memulai kamera ID:", selectedDeviceId);
+        console.log("Menggunakan Kamera ID:", selectedDeviceId);
 
-        // 3. Gunakan decodeFromVideoDevice dengan ID spesifik
-        // Kita juga tambahkan constraints untuk memperkuat instruksi ke browser
-        const constraints = {
-            video: { 
-                deviceId: { exact: selectedDeviceId },
-                facingMode: "environment" 
-            }
-        };
-
-        await codeReader.decodeFromConstraints(constraints, 'video', (result, err) => {
+        // 5. Jalankan dengan ID terpilih
+        await codeReader.decodeFromVideoDevice(selectedDeviceId, 'video', (result, err) => {
             if (result) {
                 const found = products.value.find(p => p.barcode === result.text);
                 if (found) {
@@ -122,14 +122,11 @@ const startScanner = async () => {
                     stopScanner();
                 }
             }
-            if (err && !(err instanceof ZXing.NotFoundException)) {
-                // Abaikan error "not found" karena itu wajar saat proses scanning
-            }
         });
 
     } catch (err) {
-        console.error("Gagal inisialisasi kamera:", err);
-        // Jika gagal total, gunakan cara paling simpel
+        console.error("Scanner Error:", err);
+        // Fallback terakhir: biarkan browser yang pilih
         codeReader.decodeFromVideoDevice(undefined, 'video', (result) => {
             if (result) {
                 const found = products.value.find(p => p.barcode === result.text);
@@ -139,9 +136,9 @@ const startScanner = async () => {
     }
 };
 
-const stopScanner = () => {
+const stopScanner = async () => {
     if (codeReader) {
-        codeReader.reset(); // Ini penting untuk mematikan lampu kamera dan stream
+        await codeReader.reset();
         codeReader = null;
     }
     isScanning.value = false;
