@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ZafPOS - Modern Offline POS</title>
+    <meta name="theme-color" content="#4f46e5">
+    <link rel="manifest" href="data:application/manifest+json,{'name':'ZafPOS','short_name':'ZafPOS','start_url':'.','display':'standalone','background_color':'#ffffff','theme_color':'#4f46e5','icons':[{'src':'https://cdn-icons-png.flaticon.com/512/2652/2652218.png','sizes':'512x512','type':'image/png'}]}">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+    <script src="https://unpkg.com/jsbarcode@latest/dist/JsBarcode.all.min.js"></script>
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        .active-tab { color: #4f46e5; border-top: 2px solid #4f46e5; }
+        body { -webkit-tap-highlight-color: transparent; }
+        @media print { .no-print { display: none; } .print-only { display: block !important; } }
+        .print-only { display: none; }
+    </style>
+</head>
+<body class="bg-gray-50 pb-20">
+    <div id="app" v-cloak>
+        <header class="bg-indigo-600 text-white p-4 sticky top-0 z-50 shadow-md flex justify-between items-center">
+            <h1 class="font-bold text-xl">ZafPOS</h1>
+            <span class="text-xs bg-indigo-500 px-2 py-1 rounded">{{ dbStatus }}</span>
+        </header>
+
+        <main class="p-4 max-w-md mx-auto">
+            <section v-if="activeTab === 'pos'">
+                <div class="mb-4">
+                    <button @click="startScanner" class="w-full bg-indigo-600 text-white p-4 rounded-xl flex items-center justify-center gap-2 shadow-lg">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v1m-3.3 3.6l-.7-.7m12.1 2.1h-1m-4.7 6.3l.7.7M6.4 19.4l.7-.7M4 12h1m3.1-7.8l-.7.7"></path></svg>
+                        Scan Barcode
+                    </button>
+                    <div id="scanner-container" v-show="isScanning" class="mt-2 bg-black rounded-lg overflow-hidden relative">
+                        <video id="video" class="w-full h-48 object-cover"></video>
+                        <button @click="stopScanner" class="absolute top-2 right-2 bg-red-500 text-white px-2 py-1 rounded text-xs">Close</button>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <div v-for="item in cart" :key="item.id" class="bg-white p-3 rounded-lg shadow-sm flex justify-between items-center">
+                        <div>
+                            <p class="font-semibold">{{ item.name }}</p>
+                            <p class="text-xs text-gray-500">Rp {{ item.price.toLocaleString() }}</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button @click="updateQty(item, -1)" class="w-8 h-8 rounded-full bg-gray-100">-</button>
+                            <span class="font-bold">{{ item.qty }}</span>
+                            <button @click="updateQty(item, 1)" class="w-8 h-8 rounded-full bg-gray-100">+</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="cart.length" class="mt-6 p-4 bg-white rounded-xl shadow-inner border">
+                    <div class="flex justify-between text-lg font-bold mb-4">
+                        <span>Total:</span>
+                        <span>Rp {{ cartTotal.toLocaleString() }}</span>
+                    </div>
+                    <button @click="checkout" class="w-full bg-green-500 text-white p-3 rounded-lg font-bold">Bayar Sekarang</button>
+                </div>
+            </section>
+
+            <section v-if="activeTab === 'products'">
+                <button @click="showAddProduct = !showAddProduct" class="w-full border-2 border-dashed border-indigo-300 text-indigo-600 p-3 rounded-lg mb-4">
+                    + Tambah Produk Baru
+                </button>
+
+                <div v-if="showAddProduct" class="bg-white p-4 rounded-xl shadow-md mb-6 space-y-3">
+                    <input v-model="newProd.name" placeholder="Nama Produk" class="w-full border p-2 rounded">
+                    <input v-model.number="newProd.price" type="number" placeholder="Harga" class="w-full border p-2 rounded">
+                    <input v-model.number="newProd.stock" type="number" placeholder="Stok" class="w-full border p-2 rounded">
+                    <input v-model="newProd.barcode" placeholder="Barcode (Auto-gen if empty)" class="w-full border p-2 rounded">
+                    <button @click="saveProduct" class="w-full bg-indigo-600 text-white p-2 rounded">Simpan</button>
+                </div>
+
+                <div class="space-y-2">
+                    <div v-for="p in products" :key="p.id" class="bg-white p-3 rounded-lg flex justify-between items-center shadow-sm">
+                        <div>
+                            <p class="font-bold">{{ p.name }}</p>
+                            <p class="text-xs text-gray-400">#{{ p.barcode }} | Stok: {{ p.stock }}</p>
+                            <svg :id="'bc-' + p.barcode" class="mt-1 h-12"></svg>
+                        </div>
+                        <button @click="printLabel(p)" class="text-indigo-500 p-2">Print</button>
+                    </div>
+                </div>
+            </section>
+
+            <section v-if="activeTab === 'transactions'">
+                <h2 class="font-bold mb-4">Riwayat Transaksi</h2>
+                <div v-for="t in transactions" :key="t.id" class="bg-white p-3 mb-2 rounded-lg text-sm">
+                    <div class="flex justify-between font-bold border-b pb-1">
+                        <span>#{{ t.id }}</span>
+                        <span>Rp {{ t.total.toLocaleString() }}</span>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-1">{{ formatDate(t.date) }}</p>
+                </div>
+            </section>
+        </main>
+
+        <nav class="fixed bottom-0 w-full bg-white border-t flex justify-around p-2 no-print shadow-lg">
+            <button @click="activeTab = 'pos'" :class="{'active-tab': activeTab === 'pos'}" class="flex flex-col items-center p-2">
+                <span class="text-[10px]">Kasir</span>
+            </button>
+            <button @click="activeTab = 'products'" :class="{'active-tab': activeTab === 'products'}" class="flex flex-col items-center p-2">
+                <span class="text-[10px]">Produk</span>
+            </button>
+            <button @click="activeTab = 'transactions'" :class="{'active-tab': activeTab === 'transactions'}" class="flex flex-col items-center p-2">
+                <span class="text-[10px]">Riwayat</span>
+            </button>
+            <button @click="activeTab = 'settings'" :class="{'active-tab': activeTab === 'settings'}" class="flex flex-col items-center p-2">
+                <span class="text-[10px]">Setelan</span>
+            </button>
+        </nav>
+
+        <div id="print-area" class="print-only p-4">
+            <h2 id="print-title" class="text-center font-bold"></h2>
+            <svg id="print-barcode" class="mx-auto"></svg>
+        </div>
+    </div>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(err => console.log(err));
+        }
+    </script>
+    <script src="app.js"></script>
+</body>
+</html>
