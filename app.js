@@ -150,11 +150,6 @@ const stopScanner = async () => {
             else cart.value.push({ ...product, qty: 1 });
         };
 
-        const stopScanner = () => {
-            if (codeReader) codeReader.reset();
-            isScanning.value = false;
-        };
-
         const printLabel = (product) => {
             document.getElementById('print-title').innerText = product.name;
             JsBarcode("#print-barcode", product.barcode);
