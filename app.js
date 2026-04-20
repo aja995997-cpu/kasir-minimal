@@ -2,30 +2,30 @@ const { createApp, ref, onMounted, computed, nextTick } = Vue;
 
 const app = createApp({
     setup() {
-        // --- DATABASE SETUP (DEXIE.JS) ---
+        // --- DATABASE SETUP ---
         const db = new Dexie("ZafPOS_DB");
         db.version(1).stores({
             products: "++id, name, price, stock, &barcode",
             transactions: "++id, total, date"
         });
 
-        // --- STATE / REACTIVE VARS ---
+        // --- STATE ---
         const activeTab = ref('pos');
-        const dbStatus = ref('Online Mode');
+        const dbStatus = ref('Offline Mode');
         const products = ref([]);
         const transactions = ref([]);
         const cart = ref([]);
         const isScanning = ref(false);
+        const isContinuous = ref(false); // Fitur baru: Toggle Continue
         const showAddProduct = ref(false);
         const newProd = ref({ name: '', price: 0, stock: 0, barcode: '' });
 
-        // --- SCANNER INSTANCE ---
         let codeReader = null;
+        let lastScannedCode = null; // Untuk mencegah double scan barang yang sama dalam waktu singkat
+        let scanTimeout = null;
 
-        // --- COMPUTED ---
         const cartTotal = computed(() => cart.value.reduce((acc, item) => acc + (item.price * item.qty), 0));
 
-        // --- METHODS ---
         const loadData = async () => {
             products.value = await db.products.toArray();
             transactions.value = await db.transactions.orderBy('date').reverse().toArray();
@@ -44,15 +44,12 @@ const app = createApp({
         const saveProduct = async () => {
             if (!newProd.value.name) return alert("Nama produk wajib diisi");
             if (!newProd.value.barcode) newProd.value.barcode = Date.now().toString().slice(-8);
-            
             try {
                 await db.products.add({ ...newProd.value });
                 newProd.value = { name: '', price: 0, stock: 0, barcode: '' };
                 showAddProduct.value = false;
                 await loadData();
-            } catch (e) {
-                alert("Gagal simpan: Barcode mungkin sudah ada");
-            }
+            } catch (e) { alert("Barcode sudah ada"); }
         };
 
         const addToCart = (product) => {
@@ -62,6 +59,7 @@ const app = createApp({
             } else {
                 cart.value.push({ ...product, qty: 1 });
             }
+            navigator.vibrate?.(100);
         };
 
         const updateQty = (item, change) => {
@@ -73,95 +71,77 @@ const app = createApp({
         };
 
         const checkout = async () => {
-            if (cart.value.length === 0) return;
-            const trx = {
-                items: JSON.parse(JSON.stringify(cart.value)),
-                total: cartTotal.value,
-                date: new Date()
-            };
-            
+            if (!cart.value.length) return;
+            const trx = { items: JSON.parse(JSON.stringify(cart.value)), total: cartTotal.value, date: new Date() };
             await db.transactions.add(trx);
             for (const item of cart.value) {
                 await db.products.where('id').equals(item.id).modify(p => p.stock -= item.qty);
             }
-            
             cart.value = [];
-            alert("Transaksi Berhasil!");
+            alert("Berhasil!");
             await loadData();
         };
 
-        // --- SCANNER LOGIC (FIXED) ---
+        // --- SCANNER LOGIC (CONTINUOUS MODE) ---
         const startScanner = async () => {
             isScanning.value = true;
+            lastScannedCode = null;
             
             try {
-                if (!codeReader) {
-                    codeReader = new ZXing.BrowserMultiFormatReader();
-                }
+                if (!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
 
-                // 1. Pancing izin kamera
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 stream.getTracks().forEach(track => track.stop());
 
-                // 2. Dapatkan list perangkat
                 const videoDevices = await codeReader.listVideoInputDevices();
-                
-                // 3. Cari kamera belakang
-                let selectedDeviceId = null;
-                const backCamera = videoDevices.find(device => 
-                    /back|rear|environment|belakang/i.test(device.label)
-                );
-
-                // Default ke kamera terakhir jika label tidak ditemukan
-                selectedDeviceId = backCamera ? backCamera.deviceId : videoDevices[videoDevices.length - 1].deviceId;
-
-                console.log("Menggunakan Kamera:", selectedDeviceId);
+                let selectedDeviceId = videoDevices.find(d => /back|rear|environment/i.test(d.label))?.deviceId 
+                                     || videoDevices[videoDevices.length - 1].deviceId;
 
                 await codeReader.decodeFromVideoDevice(selectedDeviceId, 'video', (result, err) => {
                     if (result) {
+                        // Logika Anti-Spam: Jangan scan barcode yang sama dalam 2 detik jika mode berlanjut
+                        if (isContinuous.value && result.text === lastScannedCode) return;
+
                         const found = products.value.find(p => p.barcode === result.text);
                         if (found) {
                             addToCart(found);
-                            navigator.vibrate?.(100);
-                            stopScanner();
-                        } else {
-                            console.log("Barcode tidak terdaftar:", result.text);
+                            lastScannedCode = result.text;
+                            
+                            // Jika mode sekali scan, matikan scanner
+                            if (!isContinuous.value) {
+                                stopScanner();
+                            } else {
+                                // Reset memory barcode terakhir setelah 2 detik agar bisa scan barang yang sama lagi
+                                clearTimeout(scanTimeout);
+                                scanTimeout = setTimeout(() => { lastScannedCode = null; }, 2000);
+                            }
                         }
                     }
                 });
             } catch (err) {
-                console.error("Scanner Error:", err);
+                console.error(err);
                 isScanning.value = false;
-                alert("Kamera error. Pastikan izin diberikan & gunakan HTTPS.");
             }
         };
 
         const stopScanner = () => {
-            if (codeReader) {
-                codeReader.reset();
-            }
+            if (codeReader) codeReader.reset();
             isScanning.value = false;
         };
 
-        const printLabel = (product) => {
-            const printTitle = document.getElementById('print-title');
-            if (printTitle) printTitle.innerText = product.name;
-            JsBarcode("#print-barcode", product.barcode);
+        const printLabel = (p) => {
+            document.getElementById('print-title').innerText = p.name;
+            JsBarcode("#print-barcode", p.barcode);
             window.print();
         };
 
-        const formatDate = (date) => {
-            return new Intl.DateTimeFormat('id-ID', { 
-                dateStyle: 'medium', 
-                timeStyle: 'short' 
-            }).format(new Date(date));
-        };
+        const formatDate = (date) => new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(date));
 
         onMounted(loadData);
 
         return {
             activeTab, dbStatus, products, transactions, cart, cartTotal,
-            isScanning, showAddProduct, newProd,
+            isScanning, isContinuous, showAddProduct, newProd,
             saveProduct, updateQty, checkout, startScanner, stopScanner, printLabel, formatDate
         };
     }
