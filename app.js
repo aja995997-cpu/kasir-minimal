@@ -88,7 +88,7 @@ const app = createApp({
             lastScannedCode = null;
             
             try {
-                if (!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
+                if (!codeReader) codeReader = new ZXing.BrowserCodeReader();
 
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 stream.getTracks().forEach(track => track.stop());
